@@ -1,0 +1,18 @@
+INFO:     Started server process [10680]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     127.0.0.1:60028 - "GET /api/wazuh/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:64496 - "GET /api/wazuh/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:54003 - "GET /api/wazuh/alerts?limit=50&offset=0&sort=-%40timestamp HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:54003 - "GET /api/wazuh/alerts?limit=50&offset=0&sort=-%40timestamp HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:54003 - "GET /api/wazuh/alerts?limit=50&offset=0&sort=-%40timestamp HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49370 - "GET /api/wazuh/status HTTP/1.1" 404 Not Found
+Error checking Wazuh status: module 'app.services.wazuh_client' has no attribute 'health_check'
+INFO:     127.0.0.1:50893 - "GET /wazuh/status HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:50898 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60010 - "GET /api/wazuh/alerts?limit=50&offset=0&sort=-%40timestamp HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60010 - "GET /api/wazuh/alerts?limit=50&offset=0&sort=-%40timestamp HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60010 - "GET /api/wazuh/alerts?limit=50&offset=0&sort=-%40timestamp HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57594 - "GET /api/wazuh/status HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57594 - "GET /favicon.ico HTTP/1.1" 404 Not Found

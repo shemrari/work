@@ -1,0 +1,245 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: db
+    restart: unless-stopped
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=wazuh
+      - POSTGRES_PASSWORD=wazuh
+      - POSTGRES_DB=wazuh
+
+  backend:
+    build: ./backend
+    container_name: backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - wazuh.manager
+      - wazuh.indexer
+      - wazuh-agent
+      - attack-simulator
+    environment:
+      - DATABASE_URL=postgresql://wazuh:wazuh@db:5432/wazuh
+      - WAZUH_API_URL=https://wazuh.manager:55000
+      - WAZUH_USERNAME=wazuh-wui
+      - WAZUH_PASSWORD=MyS3cr37P450r.*-
+      - WAZUH_VERIFY_SSL=true
+      - WAZUH_INDEXER_URL=https://wazuh.indexer:9200
+      - WAZUH_INDEXER_USERNAME=admin
+      - WAZUH_INDEXER_PASSWORD=SecretPassword
+      - WAZUH_INDEXER_VERIFY_SSL=true
+      - SSL_CERT_FILE=/etc/ssl/wazuh/root-ca.pem
+      - WAZUH_VERIFY_SSL=false
+      - ATTACK_SIMULATOR_URL=http://attack-simulator:8090
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-chemrari.maroua@gmail.com}
+      - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH:-}
+      - AUTH_SESSION_TTL_MINUTES=${AUTH_SESSION_TTL_MINUTES:-480}
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-false}
+      - PASSWORD_RESET_TTL_MINUTES=${PASSWORD_RESET_TTL_MINUTES:-30}
+      - FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-http://localhost}
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-marouach.bdm@gmail.com}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-marouach.bdm@gmail.com}
+      - SMTP_USE_SSL=${SMTP_USE_SSL:-false}
+      - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
+      - SMTP_TIMEOUT_SECONDS=${SMTP_TIMEOUT_SECONDS:-20}
+    volumes:
+      - ./wazuh/single-node/config/wazuh_indexer_ssl_certs/root-ca.pem:/etc/ssl/wazuh/root-ca.pem:ro
+    networks:
+      - default
+      - simulation-lab
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+  wazuh.manager:
+    image: wazuh/wazuh-manager:4.14.8
+    hostname: wazuh.manager
+    restart: always
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 655360
+        hard: 655360
+    ports:
+      - "1514:1514"
+      - "1515:1515"
+      - "514:514/udp"
+    
+    environment:
+      - INDEXER_URL="https://wazuh.indexer:9200"
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - FILEBEAT_SSL_VERIFICATION_MODE=full
+      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/root-ca.pem
+      - SSL_CERTIFICATE=/etc/ssl/filebeat.pem
+      - SSL_KEY=/etc/ssl/filebeat.key
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=MyS3cr37P450r.*-
+    volumes:
+      - wazuh_api_configuration:/var/ossec/api/configuration
+      - wazuh_etc:/var/ossec/etc
+      - wazuh_logs:/var/ossec/logs
+      - wazuh_queue:/var/ossec/queue
+      - wazuh_var_multigroups:/var/ossec/var/multigroups
+      - wazuh_integrations:/var/ossec/integrations
+      - wazuh_active_response:/var/ossec/active-response/bin
+      - wazuh_agentless:/var/ossec/agentless
+      - wazuh_wodles:/var/ossec/wodles
+      - filebeat_etc:/etc/filebeat
+      - filebeat_var:/var/lib/filebeat
+      - ./wazuh/single-node/config/wazuh_indexer_ssl_certs/root-ca-manager.pem:/etc/ssl/root-ca.pem
+      - ./wazuh/single-node/config/wazuh_indexer_ssl_certs/wazuh.manager.pem:/etc/ssl/filebeat.pem
+      - ./wazuh/single-node/config/wazuh_indexer_ssl_certs/wazuh.manager-key.pem:/etc/ssl/filebeat.key
+      - ./wazuh/single-node/config/wazuh_cluster/wazuh_manager.conf:/wazuh-config-mount/etc/ossec.conf
+
+  wazuh-agent:
+    image: wazuh/wazuh-agent:4.14.8
+    container_name: wazuh-ssh-lab-agent
+    hostname: wazuh-ssh-lab-agent
+    restart: unless-stopped
+    depends_on:
+      wazuh.manager:
+        condition: service_started
+      ssh-target:
+        condition: service_healthy
+    environment:
+      - WAZUH_MANAGER_SERVER=wazuh.manager
+      - WAZUH_MANAGER_PORT=1514
+      - WAZUH_REGISTRATION_SERVER=wazuh.manager
+      - WAZUH_REGISTRATION_PORT=1515
+      - WAZUH_AGENT_NAME=ssh-lab-target
+      - WAZUH_AGENT_GROUP=default
+    volumes:
+      - ./attack-simulator/agent/ossec.conf:/wazuh-config-mount/etc/ossec.conf:ro
+      - simulation-auth-logs:/var/log/ssh-lab:ro
+    networks:
+      - default
+
+  ssh-target:
+    build:
+      context: ./attack-simulator/target
+    container_name: ssh-lab-target
+    hostname: ssh-lab-target
+    restart: unless-stopped
+    volumes:
+      - simulation-auth-logs:/var/log/ssh-lab
+    networks:
+      simulation-lab:
+        aliases:
+          - ssh-lab-target
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/22'"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 5s
+
+  attack-simulator:
+    build: ./attack-simulator
+    container_name: attack-simulator
+    hostname: attack-simulator
+    restart: unless-stopped
+    depends_on:
+      ssh-target:
+        condition: service_healthy
+    networks:
+      - simulation-lab
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8090/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  wazuh.indexer:
+    image: wazuh/wazuh-indexer:4.14.8
+    hostname: wazuh.indexer
+    restart: always
+    ports:
+      - "9200:9200"
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - wazuh-indexer-data:/var/lib/wazuh-indexer
+      - ./wazuh/single-node/config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-indexer/config/certs/root-ca.pem
+      - ./wazuh/single-node/config/wazuh_indexer_ssl_certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.key
+      - ./wazuh/single-node/config/wazuh_indexer_ssl_certs/wazuh.indexer.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.pem
+      - ./wazuh/single-node/config/wazuh_indexer_ssl_certs/admin.pem:/usr/share/wazuh-indexer/config/certs/admin.pem
+      - ./wazuh/single-node/config/wazuh_indexer_ssl_certs/admin-key.pem:/usr/share/wazuh-indexer/config/certs/admin-key.pem
+      - ./wazuh/single-node/config/wazuh_indexer/wazuh.indexer.yml:/usr/share/wazuh-indexer/config/opensearch.yml
+      - ./wazuh/single-node/config/wazuh_indexer/internal_users.yml:/usr/share/wazuh-indexer/config/opensearch-security/internal_users.yml
+
+  wazuh.dashboard:
+    image: wazuh/wazuh-dashboard:4.14.8
+    hostname: wazuh.dashboard
+    restart: always
+    ports:
+      - 443:5601
+    environment:
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - WAZUH_API_URL=https://wazuh.manager
+      - DASHBOARD_USERNAME=kibanaserver
+      - DASHBOARD_PASSWORD=kibanaserver
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=MyS3cr37P450r.*-
+    volumes:
+      - ./wazuh/single-node/config/wazuh_indexer_ssl_certs/wazuh.dashboard.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard.pem
+      - ./wazuh/single-node/config/wazuh_indexer_ssl_certs/wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard-key.pem
+      - ./wazuh/single-node/config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-dashboard/certs/root-ca.pem
+      - ./wazuh/single-node/config/wazuh_dashboard/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml
+      - ./wazuh/single-node/config/wazuh_dashboard/wazuh.yml:/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
+      - wazuh-dashboard-config:/usr/share/wazuh-dashboard/data/wazuh/config
+      - wazuh-dashboard-custom:/usr/share/wazuh-dashboard/plugins/wazuh/public/assets/custom
+    depends_on:
+      - wazuh.indexer
+    links:
+      - wazuh.indexer:wazuh.indexer
+      - wazuh.manager:wazuh.manager
+
+volumes:
+  db_data:
+  wazuh_api_configuration:
+  wazuh_etc:
+  wazuh_logs:
+  wazuh_queue:
+  wazuh_var_multigroups:
+  wazuh_integrations:
+  wazuh_active_response:
+  wazuh_agentless:
+  wazuh_wodles:
+  filebeat_etc:
+  filebeat_var:
+  wazuh-indexer-data:
+  wazuh-dashboard-config:
+  wazuh-dashboard-custom:
+
+  simulation-auth-logs:
+
+networks:
+  simulation-lab:
+    internal: true
